@@ -2,8 +2,13 @@ import time
 import openai
 import re
 import statistics
-answer_dicts = dict.fromkeys(['commonsense_qa', 'ai2_arc', 'mmlu', 'databricks', "LongForm"], {'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '0':0})
+import os
+from openai import OpenAI
+answer_dicts = dict.fromkeys(['commonsense_qa', 'ai2_arc', 'mmlu', 'databricks', 'databricks_sub', "LongForm", "FinTalk"], {'A': 1, 'B': 2, 'C': 3, 'D': 4, 'E': 5, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '0':0})
 answer_dicts["pubmed_qa"] = {"yes": 1, "no": 2, "maybe": 3}
+client = OpenAI(
+  api_key=os.environ['OPENAI_API_KEY'],  # this is also the default, it can be omitted
+)
 
 
 system_messages = {'normal': "You are taking a test. Provide your answers by responding only with the number of the appropriate answer for the presented question",
@@ -75,7 +80,7 @@ def getResponse(messages, model="gpt-3.5-turbo"):
 		model = model_selection
 	while not successful_response:
 		try:
-			response = openai.ChatCompletion.create(
+			response = client.chat.completions.create(
 
 				model=model,
 				messages=messages
@@ -94,7 +99,8 @@ def getResponse(messages, model="gpt-3.5-turbo"):
 				print("Max tries exceeded")
 				sys.exit()
 	# time.sleep(4)
-	return response['choices'][0]['message']['content'][:2000]
+	# print(response.choices[0].message.content)
+	return response.choices[0].message.content[:2000]
 
 def llm_judge(response, question, answer):
 	messages = messages =[
@@ -159,16 +165,18 @@ def grade_answer(LLM_response, dataset_name, row, record, content, output_file, 
 			record.writerow([content,LLM_response, correct_answer, is_correct])
 
 		
-		return (correct, incorrect, invalid), rating
+		return (correct, incorrect, invalid)
 
 
 	elif style == "long":
 		if dataset_name in ("pubmed_qa"):
 			correct_answer = row['long_answer']
-		elif dataset_name in ["databricks"]:
+		elif dataset_name in ["databricks", "databricks_sub"]:
 			correct_answer = row['response']
 		elif dataset_name in ["LongForm"]:
 			correct_answer = row['output']
+		elif dataset_name in ["FinTalk"]:
+			correct_answer = row['response']
 		evaluations = []
 		for i in range(judge_eval_iterations):
 
@@ -181,10 +189,10 @@ def grade_answer(LLM_response, dataset_name, row, record, content, output_file, 
 				rating = 1
 			if rating > 5:
 				correct += 1
-				print("Correct!\n")
+				# print("Correct!\n")
 			else:
 				incorrect += 1
-				print("Incorrect!\n")
+				# print("Incorrect!\n")
 
 			is_correct = rating
 			evaluations.append(rating)

@@ -13,10 +13,10 @@ from roundtable import roundTable
 import utils
 from utils import getResponse, grade_answer, llm_judge
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# openai.api_key = os.getenv("OPENAI_API_KEY")
 #System messages for question answering
 system_messages = {'normal': "You are taking a test. Provide your answers by responding only with the number of the appropriate answer for the presented question",
-'researcher': "Act as a researcher with an IQ of 180 that is an expert at problem solving, common sense reasoning, and strategy. You are taking a test. Provide your answers by responding only with the number of the appropriate answer for the presented question,",
+'researcher': "Act as a researcher with an IQ of 180 that is an expert at problem solving, common sense reasoning, and strategy. You are taking a test. Provide your answers by responding only with the number of the appropriate answer for the presented question",
 'persona': "You are taking a test. Act as the persona provided and provide your answers by responding only with the number of the appropriate answer for the presented question",
 'roundtable_admin_initial': "You are taking a test. Provide your answers by responding with the number of the appropriate answer for the presented question as well as your reasoning for choosing it.",
 'roundtable_expert': "You are {}, also referred to as {}.\n You are assisting the administrator in taking a test by offering useful critique and information. Provide feedback on the most recent answer given by the administrator, as well as their reasoning and offer suggested changes if you think the answer is incorrected, as well as your reasoning why. Pay attention to the feedback of any other experts and correct any incorrect information or suggestions. ((Be succinct and only suggest answers that are provided by the question. Do not provide overly long feedback. Do not exceed 1500 characters in your response))",
@@ -81,34 +81,47 @@ def takeTest(dataset_name="commonsense_qa", style="normal", question_limit=100, 
 	if dataset_name == "commonsense_qa":
 		dataset = load_dataset("commonsense_qa", split='train')
 	elif dataset_name == "ai2_arc":
-		dataset = load_dataset("ai2_arc", 'ARC-Challenge')
+		dataset = load_dataset("ai2_arc", 'ARC-Challenge', split='train', ignore_verifications=True)
 	elif dataset_name == "mmlu":
 		dataset = load_dataset("cais/mmlu", "all", split="auxiliary_train")
 	elif dataset_name == "databricks":
 		dataset = load_dataset("databricks/databricks-dolly-15k", split='train')
-	elif dataset_name == "LongForm":
-		dataset = load_dataset("akoksal/LongForm", split='train')
-	else:
-		dataset = load_dataset("pubmed_qa", 'pqa_labeled', split='train')
-
-	if dataset_name == "LongForm":
+	elif dataset_name == "databricks_sub":
+		dataset = load_dataset("databricks/databricks-dolly-15k", split='train')
+		desired_categories = ["creative_writing", "brainstorming"]
 		to_remove = []
 		large_count = 0
 		for entry in dataset:
-			# if entry['subset'] == 'boardgames':
-			# 	# print(entry)
-			# 	pass
+			if not entry['category'] in desired_categories:
+				large_count += 1
+				to_remove.append(entry)
+
+		print(large_count)
+		dataset = dataset.to_list()
+		for entry in to_remove:
+			dataset.remove(entry)
+		dataset = Dataset.from_list(dataset)
+	elif dataset_name == "LongForm":
+		dataset = load_dataset("akoksal/LongForm", split='train')
+		to_remove = []
+		large_count = 0
+		for entry in dataset:
 			if len(entry['output']) > 2000 or len(entry['input']) > 2000:
 				large_count += 1
 				to_remove.append(entry)
 
 		print(large_count)
-		# print(dir(dataset))
 		dataset = dataset.to_list()
 		for entry in to_remove:
 			dataset.remove(entry)
 		dataset = Dataset.from_list(dataset)
-		# sys.exit()
+	elif dataset_name == "FinTalk":
+		dataset = load_dataset("ceadar-ie/FinTalk-19k", split='train')
+	else:
+		dataset = load_dataset("pubmed_qa", 'pqa_artificial')
+
+	# if dataset_name == "LongForm":
+	
 
 	
 	shuffle_seed = random.randint(0,1000)
@@ -126,15 +139,16 @@ def takeTest(dataset_name="commonsense_qa", style="normal", question_limit=100, 
 	aggregate_scores = []
 	for row in selection:
 		record_row = []
-		if dataset_name in ["pubmed_qa","databricks", "LongForm"]:
+		if dataset_name in ["pubmed_qa","databricks", "databricks_sub", "LongForm", "FinTalk"]:
 			choices = ["yes" ,"no", "maybe"]
 		else:
 			choices = row['choices']
 		if dataset_name in ("commonsense_qa", "ai2_arc"):
 			choices = choices["text"]
 		if dataset_name == "commonsense_qa":
-			content = "{} \n1. {} \n2. {} \n3. {} \n4. {} \n5. {}".format(row['question'], choices['text'][0], 
-						choices['text'][1], choices['text'][2], choices['text'][3], choices['text'][4])
+			print(choices)
+			content = "{} \n1. {} \n2. {} \n3. {} \n4. {} \n5. {}".format(row['question'], choices[0], 
+						choices[1], choices[2], choices[3], choices[4])
 		elif dataset_name == "pubmed_qa":
 			content = ""
 			
@@ -145,23 +159,26 @@ def takeTest(dataset_name="commonsense_qa", style="normal", question_limit=100, 
 			if not (style[-4:] =="long"):
 				for i in range(len(choices)):
 					content+= "{}. {} \n".format(i+1, choices[i])
-		elif dataset_name == "databricks":
+		elif dataset_name in ["databricks", "databricks_sub"]:
 			content = row["context"]
 			content += "\n\n" + row["instruction"]
 
 		elif dataset_name == "LongForm":
 			content = row["input"]
 
+		elif dataset_name == "FinTalk":
+			content = f"{row['context']}\n{row['instruction']}"
+
 
 		else:
 			
 			content = row['question'] + "\n"
-			print(row)
+			# print(row)
 			for i in range(len(choices)):
 				content+= "{}. {} \n".format(i+1, choices[i])
 
-		print("Sending question {} of {}".format((correct + incorrect + 1), len(selection)))
-		print(content)
+		# print("Sending question {} of {}".format((correct + incorrect + 1), len(selection)))
+		# print(content)
 		if style == "roundtable":
 			LLM_response = roundTable(content, record=record, record_file=recording_file)
 		elif style == "roundtable_long":
@@ -175,9 +192,9 @@ def takeTest(dataset_name="commonsense_qa", style="normal", question_limit=100, 
 	
 			if style in ["persona", "persona_long"]:
 				if dataset_name in ["LongForm"]:
-					persona_content = "Describe a detailed persona of an expert who would be able to answer the following question:\n {}".format(row['input'])
+					persona_content = "Describe a detailed persona of an expert who would be able to answer the following question:\n {}".format(content)
 				else:
-					persona_content = "Describe a detailed persona of an expert who would be able to answer the following question:\n {}".format(row['question'])
+					persona_content = "Describe a detailed persona of an expert who would be able to answer the following question:\n {}".format(content)
 				messages =[
 					{"role": "system", "content": "You are an expert at describing personas. Return a detailed description of only the persona that was requested."},
 					{"role": "user", "content": persona_content}
@@ -196,8 +213,8 @@ def takeTest(dataset_name="commonsense_qa", style="normal", question_limit=100, 
 			print(content)
 			LLM_response = getResponse(messages)
 		grading_style = "long" if style[-4:] == "long" else "mc"
-		print(f"grading_style: {grading_style}")
-		print(style[-4:])
+		# print(f"grading_style: {grading_style}")
+		# print(style[-4:])
 		if grading_style == "long":
 			correct, incorrect, invalid, rating = grade_answer(LLM_response, dataset_name, row, record, content, output_file, correct, incorrect, invalid, style=grading_style, judge_eval_iterations = judge_evaluations)
 			aggregate_scores.append(rating)
@@ -291,7 +308,10 @@ if __name__ == "__main__":
 		else:
 			styles = [args.style.lower()]
 		for style in styles:
-				takeTest(style=style, question_limit = question_limit, output_file = "output/" + args.file_base, dataset_name=args.dataset, judge_evaluations = args.judge_evals)
+			if args.style.lower == "all" and style == 'roundtable':
+				takeTest(style=style, question_limit = question_limit//2, output_file = "output/" + args.file_base, dataset_name=args.dataset, judge_evaluations = args.judge_evals)
+
+			takeTest(style=style, question_limit = question_limit, output_file = "output/" + args.file_base, dataset_name=args.dataset, judge_evaluations = args.judge_evals)
 
 	else:
 		if args.style.lower() == "all":
@@ -302,6 +322,9 @@ if __name__ == "__main__":
 		else:
 			styles = [args.style.lower() + "_long"]
 		for style in styles:
-				takeTest(style=style, question_limit = question_limit, output_file = "output/" + args.file_base, dataset_name=args.dataset, judge_evaluations = args.judge_evals)
+			if args.style.lower == "all" and style == 'roundtable':
+				takeTest(style=style, question_limit = question_limit//2, output_file = "output/" + args.file_base, dataset_name=args.dataset, judge_evaluations = args.judge_evals)
+
+			takeTest(style=style, question_limit = question_limit, output_file = "output/" + args.file_base, dataset_name=args.dataset, judge_evaluations = args.judge_evals)
 	
 
